@@ -298,6 +298,7 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
 
    if (type != 0 && !port->connected)
    {
+   	printf("%s", "uinput created");
       uinput_create(i, port, type);
    }
    else if (type == 0 && port->connected)
@@ -320,23 +321,32 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
    int e_count = 0;
 
    uint16_t btns = (uint16_t) payload[1] << 8 | (uint16_t) payload[2];
-
+	
    for (int j = 0; j < 16; j++)
    {
+   	//printf("%i\n",payload[j]);
+   	 sleep(1);
       if (BUTTON_OFFSET_VALUES[j] == -1)
          continue;
 
       uint16_t mask = (1 << j);
       uint16_t pressed = btns & mask;
-
+	
       if ((port->buttons & mask) != pressed)
       {
+      
          events[e_count].type = EV_KEY;
          events[e_count].code = BUTTON_OFFSET_VALUES[j];
          events[e_count].value = (pressed == 0) ? 0 : 1;
+       
+         
          e_count++;
+         printf("%i",e_count);  
          port->buttons &= ~mask;
          port->buttons |= pressed;
+         printf("%b", port->buttons);
+        
+               
       }
    }
 
@@ -344,6 +354,7 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
    {
       unsigned char value = payload[j+3];
 
+	
       if (AXIS_OFFSET_VALUES[j] == ABS_Y || AXIS_OFFSET_VALUES[j] == ABS_RY)
          value ^= 0xFF; // flip from 0 - 255 to 255 - 0
 
@@ -354,7 +365,10 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
          events[e_count].value = value;
          e_count++;
          port->axis[j] = value;
-      }
+      }else{
+      	//printf("%d\n", value );
+	//sleep(1);
+	}
    }
 
    if (e_count > 0)
@@ -381,7 +395,6 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
    ssize_t ret = read(port->uinput, &e, sizeof(e));
    if (ret == sizeof(e))
    {
-   printf("%s","what the hell does sizeof(e) mean?");
       if (e.type == EV_UINPUT)
       {
          switch (e.code)
@@ -390,7 +403,6 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
             {
                struct uinput_ff_upload upload = { 0 };
                upload.request_id = e.value;
-               printf("%s", "Requested id: ");
                ioctl(port->uinput, UI_BEGIN_FF_UPLOAD, &upload);
                int id = create_ff_event(port, &upload);
                if (id < 0)
@@ -538,6 +550,7 @@ static void add_adapter(struct libusb_device *dev)
    adapters.next = a;
    a->next = old_head;
 
+	//thread create
    pthread_create(&a->thread, NULL, adapter_thread, a);
 
    fprintf(stderr, "adapter %p connected\n", a->device);
@@ -588,90 +601,101 @@ static void quitting_signal(int sig)
 
 int main(int argc, char *argv[])
 {
-	printf("%s", "[*]main called[*]\n");
-   struct udev *udev;
-   struct udev_device *uinput;
-   struct sigaction sa;
+	printf("%s\n[*]%i was passed\n[*]%c was passed\n", "[*]main called[*]", argc, *argv[]);
+	
+	//structure declarations
+	struct udev *udev;
+	struct udev_device *uinput;
+	struct sigaction sa;
+	
+	//sets the entire string of sa to 0's
+	memset(&sa, 0, sizeof(sa));
 
-   memset(&sa, 0, sizeof(sa));
+	if (argc > 1 && (strcmp(argv[1], "-r") == 0 || strcmp(argv[1], "--raw") == 0))
+	{
+		fprintf(stderr, "raw mode enabled\n");
+		raw_mode = true;
+	}
 
-   if (argc > 1 && (strcmp(argv[1], "-r") == 0 || strcmp(argv[1], "--raw") == 0))
-   {
-      fprintf(stderr, "raw mode enabled\n");
-      raw_mode = true;
+	sa.sa_handler = quitting_signal;
+	sa.sa_flags = SA_RESTART | SA_RESETHAND;
+ 	sigemptyset(&sa.sa_mask);
+	
+	//sigaction is a system call that returns 0 on failure and 1 on success
+	//SIGINT means there is an external interrupt, usually from the user
+   	sigaction(SIGINT, &sa, NULL);
+   	//SIGTERM is a termination request
+   	sigaction(SIGTERM, &sa, NULL);
+
+   	udev = udev_new();
+   	if (udev == NULL)
+   	{
+      		fprintf(stderr, "udev init errors\n");
+      		return -1;
+   	}
+
+   	uinput = udev_device_new_from_subsystem_sysname(udev, "misc", "uinput");
+   	if (uinput == NULL)
+   	{
+      		fprintf(stderr, "uinput creation failed\n");
+      		return -1;
+   	}
+
+   	uinput_path = udev_device_get_devnode(uinput);
+   	if (uinput_path == NULL)
+   	{
+   		fprintf(stderr, "cannot find path to uinput\n");
+		return -1;
+   	}
+
+   	libusb_init(NULL);
+
+   	struct libusb_device **devices;
+
+   	int count = libusb_get_device_list(NULL, &devices);
+
+   	for (int i = 0; i < count; i++)
+   	{
+      		struct libusb_device_descriptor desc;
+      		libusb_get_device_descriptor(devices[i], &desc);
+      	
+      		if (desc.idVendor == 0x057e && desc.idProduct == 0x0337)
+        	 	add_adapter(devices[i]);
+   	}
+
+   	if (count > 0)
+      		libusb_free_device_list(devices, 1);
+
+   	libusb_hotplug_callback_handle callback;
+
+   	int hotplug_capability = libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG);
+	if (hotplug_capability)
+	{
+		int hotplug_ret = libusb_hotplug_register_callback(NULL,
+		LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
+		0, 0x057e, 0x0337,
+		LIBUSB_HOTPLUG_MATCH_ANY, hotplug_callback, NULL, &callback);
+
+	if (hotplug_ret != LIBUSB_SUCCESS)
+	{
+		fprintf(stderr, "cannot register hotplug callback, hotplugging not enabled\n");
+		hotplug_capability = 0;
+	}
    }
 
-   sa.sa_handler = quitting_signal;
-   sa.sa_flags = SA_RESTART | SA_RESETHAND;
-   sigemptyset(&sa.sa_mask);
+	// pump events until shutdown & all helper threads finish cleaning up
+   
+   	while (!quitting)
+		libusb_handle_events_completed(NULL, (int *)&quitting);
 
-   sigaction(SIGINT, &sa, NULL);
-   sigaction(SIGTERM, &sa, NULL);
+	while (adapters.next)
+		remove_adapter(adapters.next->device);
 
-   udev = udev_new();
-   if (udev == NULL) {
-      fprintf(stderr, "udev init errors\n");
-      return -1;
-   }
+	if (hotplug_capability)
+		libusb_hotplug_deregister_callback(NULL, callback);
 
-   uinput = udev_device_new_from_subsystem_sysname(udev, "misc", "uinput");
-   if (uinput == NULL)
-   {
-      fprintf(stderr, "uinput creation failed\n");
-      return -1;
-   }
-
-   uinput_path = udev_device_get_devnode(uinput);
-   if (uinput_path == NULL)
-   {
-      fprintf(stderr, "cannot find path to uinput\n");
-      return -1;
-   }
-
-   libusb_init(NULL);
-
-   struct libusb_device **devices;
-
-   int count = libusb_get_device_list(NULL, &devices);
-
-   for (int i = 0; i < count; i++)
-   {
-      struct libusb_device_descriptor desc;
-      libusb_get_device_descriptor(devices[i], &desc);
-      if (desc.idVendor == 0x057e && desc.idProduct == 0x0337)
-         add_adapter(devices[i]);
-   }
-
-   if (count > 0)
-      libusb_free_device_list(devices, 1);
-
-   libusb_hotplug_callback_handle callback;
-
-   int hotplug_capability = libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG);
-   if (hotplug_capability) {
-       int hotplug_ret = libusb_hotplug_register_callback(NULL,
-             LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
-             0, 0x057e, 0x0337,
-             LIBUSB_HOTPLUG_MATCH_ANY, hotplug_callback, NULL, &callback);
-
-       if (hotplug_ret != LIBUSB_SUCCESS) {
-           fprintf(stderr, "cannot register hotplug callback, hotplugging not enabled\n");
-           hotplug_capability = 0;
-       }
-   }
-
-   // pump events until shutdown & all helper threads finish cleaning up
-   while (!quitting)
-      libusb_handle_events_completed(NULL, (int *)&quitting);
-
-   while (adapters.next)
-      remove_adapter(adapters.next->device);
-
-   if (hotplug_capability)
-      libusb_hotplug_deregister_callback(NULL, callback);
-
-   libusb_exit(NULL);
-   udev_device_unref(uinput);
-   udev_unref(udev);
-   return 0;
+	libusb_exit(NULL);
+	udev_device_unref(uinput);
+	udev_unref(udev);
+	return 0;
 }
