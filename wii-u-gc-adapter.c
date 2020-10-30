@@ -337,6 +337,12 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
 	{
 		if(j == 0)
 		{
+			/*
+			port->buttons is the raw data of the buttons currently being pressed
+			its output here is represented as an unsigned integer and is therefore in decimal
+			each button is a power of 2, and has its own bit
+			Note 2^4, 2^5, 2^6, 2^7 do not have any buttons
+			*/
 			printf("Button pressed: %u\n",port->buttons);
 		}
 		sleep(.75);
@@ -361,10 +367,13 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
 
 	for (int j = 0; j < 6; j++)
 	{
+		//port->axis[j] is an array holding ALL analog inputs
+		//both joysticks have 2, an X and a Y axis
+		//both triggers have 1, this is why j goes to 6
 		printf("%d:%u, ",j,port->axis[j]);
+		
 		unsigned char value = payload[j+3];
 
-	
 		if (AXIS_OFFSET_VALUES[j] == ABS_Y || AXIS_OFFSET_VALUES[j] == ABS_RY)
 			value ^= 0xFF; // flip from 0 - 255 to 255 - 0
 
