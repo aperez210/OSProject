@@ -606,9 +606,10 @@ int main(int argc, char *argv[])
 	//structure declarations
 	struct udev *udev;
 	struct udev_device *uinput;
+	//struct sigaction is the instructions for the function sigaction()
 	struct sigaction sa;
 	
-	//sets the entire string of sa to 0's
+	//sets the entire struct of sa to 0's
 	memset(&sa, 0, sizeof(sa));
 
 	if (argc > 1 && (strcmp(argv[1], "-r") == 0 || strcmp(argv[1], "--raw") == 0))
@@ -653,12 +654,14 @@ int main(int argc, char *argv[])
    	struct libusb_device **devices;
 
    	int count = libusb_get_device_list(NULL, &devices);
-
-   	for (int i = 0; i < count; i++)
+	
+	for (int i = 0; i < count; i++)
    	{
       		struct libusb_device_descriptor desc;
       		libusb_get_device_descriptor(devices[i], &desc);
-      	
+      		
+      		//tells the program what USB device to use
+      		//Vendor is Nintendo, Product is GameCube controller adapter
       		if (desc.idVendor == 0x057e && desc.idProduct == 0x0337)
         	 	add_adapter(devices[i]);
    	}
@@ -674,7 +677,6 @@ int main(int argc, char *argv[])
 		int hotplug_ret = libusb_hotplug_register_callback(NULL,
 		LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
 		0, 0x057e, 0x0337,
-		LIBUSB_HOTPLUG_MATCH_ANY, hotplug_callback, NULL, &callback);
 
 	if (hotplug_ret != LIBUSB_SUCCESS)
 	{
