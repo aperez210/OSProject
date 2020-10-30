@@ -121,7 +121,8 @@ static bool uinput_create(int i, struct ports *port, unsigned char type)
    struct uinput_user_dev uinput_dev;
    memset(&uinput_dev, 0, sizeof(uinput_dev));
    port->uinput = open(uinput_path, O_RDWR | O_NONBLOCK);
-
+	
+	printf("[*] buttons being called\n");
    // buttons
    // icotl is a system call...
    ioctl(port->uinput, UI_SET_EVBIT, EV_KEY);
@@ -137,7 +138,8 @@ static bool uinput_create(int i, struct ports *port, unsigned char type)
    ioctl(port->uinput, UI_SET_KEYBIT, BTN_TL);
    ioctl(port->uinput, UI_SET_KEYBIT, BTN_TR);
    ioctl(port->uinput, UI_SET_KEYBIT, BTN_TR2);
-
+	printf("[*] buttons done being called\n");
+	printf("[*] axis being called\n");
    // axis
    ioctl(port->uinput, UI_SET_EVBIT, EV_ABS);
    ioctl(port->uinput, UI_SET_ABSBIT, ABS_X);
@@ -174,13 +176,16 @@ static bool uinput_create(int i, struct ports *port, unsigned char type)
    ioctl(port->uinput, UI_SET_FFBIT, FF_SINE);
    ioctl(port->uinput, UI_SET_FFBIT, FF_RUMBLE);
    uinput_dev.ff_effects_max = MAX_FF_EVENTS;
-
+   
+   
    snprintf(uinput_dev.name, sizeof(uinput_dev.name), "Wii U GameCube Adapter Port %d", i+1);
+   
    uinput_dev.name[sizeof(uinput_dev.name)-1] = 0;
    uinput_dev.id.bustype = BUS_USB;
-
+	   	
    size_t to_write = sizeof(uinput_dev);
    size_t written = 0;
+
    while (written < to_write)
    {
       ssize_t write_ret = write(port->uinput, (const char*)&uinput_dev + written, to_write - written);
@@ -192,6 +197,7 @@ static bool uinput_create(int i, struct ports *port, unsigned char type)
       }
       written += write_ret;
    }
+   
 
    if (ioctl(port->uinput, UI_DEV_CREATE) != 0)
    {
@@ -199,8 +205,10 @@ static bool uinput_create(int i, struct ports *port, unsigned char type)
       close(port->uinput);
       return false;
    }
+   
    port->type = type;
    port->connected = true;
+  
    return true;
 }
 
@@ -293,225 +301,231 @@ static int create_ff_event(struct ports *port, struct uinput_ff_upload *upload)
 
 static void handle_payload(int i, struct ports *port, unsigned char *payload, struct timespec *current_time)
 {
-   unsigned char status = payload[0];
-   unsigned char type = connected_type(status);
-
-   if (type != 0 && !port->connected)
-   {
-   	printf("%s", "uinput created");
-      uinput_create(i, port, type);
-   }
-   else if (type == 0 && port->connected)
-   {
-      uinput_destroy(i, port);
-   }
-
-   if (!port->connected)
-      return;
-
-   port->extra_power = ((status & 0x04) != 0);
-
-   if (type != port->type)
-   {
-      fprintf(stderr, "controller on port %d changed controller type???\n", i+1);
-      port->type = type;
-   }
-
-   struct input_event events[12+6+1] = {0}; // buttons + axis + syn event
-   int e_count = 0;
-
-   uint16_t btns = (uint16_t) payload[1] << 8 | (uint16_t) payload[2];
+	unsigned char status = payload[0];
+	unsigned char type = connected_type(status);
 	
-   for (int j = 0; j < 16; j++)
-   {
-   	//printf("%i\n",payload[j]);
-   	 sleep(1);
-      if (BUTTON_OFFSET_VALUES[j] == -1)
-         continue;
+	if (type != 0 && !port->connected)
+	{	
+		uinput_create(i, port, type);
+		printf("%s", "uinput created\n");
+   	}
+   	else if (type == 0 && port->connected)
+   	{
+	   	printf("[*] Port connected and type == 0\n");
+    	uinput_destroy(i, port);
+   	}
 
-      uint16_t mask = (1 << j);
-      uint16_t pressed = btns & mask;
-	
-      if ((port->buttons & mask) != pressed)
-      {
-      
-         events[e_count].type = EV_KEY;
-         events[e_count].code = BUTTON_OFFSET_VALUES[j];
-         events[e_count].value = (pressed == 0) ? 0 : 1;
-       
-         
-         e_count++;
-         printf("%i",e_count);  
-         port->buttons &= ~mask;
-         port->buttons |= pressed;
-         printf("%b", port->buttons);
-        
-               
-      }
-   }
-
-   for (int j = 0; j < 6; j++)
-   {
-      unsigned char value = payload[j+3];
-
-	
-      if (AXIS_OFFSET_VALUES[j] == ABS_Y || AXIS_OFFSET_VALUES[j] == ABS_RY)
-         value ^= 0xFF; // flip from 0 - 255 to 255 - 0
-
-      if (port->axis[j] != value)
-      {
-         events[e_count].type = EV_ABS;
-         events[e_count].code = AXIS_OFFSET_VALUES[j];
-         events[e_count].value = value;
-         e_count++;
-         port->axis[j] = value;
-      }else{
-      	//printf("%d\n", value );
-	//sleep(1);
+	if (!port->connected)
+	{
+		return;
 	}
-   }
 
-   if (e_count > 0)
-   {
-      events[e_count].type = EV_SYN;
-      events[e_count].code = SYN_REPORT;
-      e_count++;
-      size_t to_write = sizeof(events[0]) * e_count;
-      size_t written = 0;
-      while (written < to_write)
-      {
-         ssize_t write_ret = write(port->uinput, (const char*)events + written, to_write - written);
-         if (write_ret < 0)
-         {
-            perror("Warning: writing input events failed");
-            break;
-         }
+	port->extra_power = ((status & 0x04) != 0);
+
+	if (type != port->type)
+	{
+		fprintf(stderr, "controller on port %d changed controller type???\n", i+1);
+		port->type = type;
+	}
+
+	struct input_event events[12+6+1] = {0}; // buttons + axis + syn event
+	int e_count = 0;
+	
+	uint16_t btns = (uint16_t) payload[1] << 8 | (uint16_t) payload[2];
+	
+	for (int j = 0; j < 16; j++)
+	{
+		if(j == 0)
+		{
+			printf("Button pressed: %u\n",port->buttons);
+		}
+		sleep(.75);
+		if (BUTTON_OFFSET_VALUES[j] == -1)
+			continue;
+
+		uint16_t mask = (1 << j);
+		uint16_t pressed = btns & mask;
+		
+		if ((port->buttons & mask) != pressed)
+		{
+			events[e_count].type = EV_KEY;
+			events[e_count].code = BUTTON_OFFSET_VALUES[j];
+			events[e_count].value = (pressed == 0) ? 0 : 1;
+       
+         	e_count++;
+    	    port->buttons &= ~mask;
+        	port->buttons |= pressed;      
+      	}
+	}
+   
+
+	for (int j = 0; j < 6; j++)
+	{
+		printf("%d:%u, ",j,port->axis[j]);
+		unsigned char value = payload[j+3];
+
+	
+		if (AXIS_OFFSET_VALUES[j] == ABS_Y || AXIS_OFFSET_VALUES[j] == ABS_RY)
+			value ^= 0xFF; // flip from 0 - 255 to 255 - 0
+
+		if (port->axis[j] != value)
+		{  		
+			events[e_count].type = EV_ABS;
+			events[e_count].code = AXIS_OFFSET_VALUES[j];
+        	events[e_count].value = value;
+        	e_count++;
+        	port->axis[j] = value;
+         
+		}
+ 	}
+
+	if (e_count > 0)
+	{
+		events[e_count].type = EV_SYN;
+		events[e_count].code = SYN_REPORT;
+		e_count++;
+		size_t to_write = sizeof(events[0]) * e_count;
+		size_t written = 0;
+		while (written < to_write)
+      	{
+			ssize_t write_ret = write(port->uinput, (const char*)events + written, to_write - written);
+			if (write_ret < 0)
+			{
+            	perror("Warning: writing input events failed");
+            	break;
+			}
          written += write_ret;
-      }
-   }
+		}
+	}
 
-   // check for rumble events
-   struct input_event e;
-   ssize_t ret = read(port->uinput, &e, sizeof(e));
-   if (ret == sizeof(e))
-   {
-      if (e.type == EV_UINPUT)
-      {
-         switch (e.code)
-         {
-            case UI_FF_UPLOAD:
-            {
-               struct uinput_ff_upload upload = { 0 };
-               upload.request_id = e.value;
-               ioctl(port->uinput, UI_BEGIN_FF_UPLOAD, &upload);
-               int id = create_ff_event(port, &upload);
-               if (id < 0)
-               {
-                  // TODO: what's the proper error code for this?
-                  upload.retval = -1;
-               }
-               else
-               {
-                  upload.retval = 0;
-                  upload.effect.id = id;
-                  printf("%s", "sick words");
-               }
-               ioctl(port->uinput, UI_END_FF_UPLOAD, &upload);
-               break;
-            }
-            case UI_FF_ERASE:
-            {
-               struct uinput_ff_erase erase = { 0 };
-               erase.request_id = e.value;
-               ioctl(port->uinput, UI_BEGIN_FF_ERASE, &erase);
-               if (erase.effect_id < MAX_FF_EVENTS)
-                  port->ff_events[erase.effect_id].in_use = false;
-               ioctl(port->uinput, UI_END_FF_ERASE, &erase);
-            }
-         }
-      }
-      //Rumble (grey USB)
-      else if (e.type == EV_FF)
-      {
-         if (e.code < MAX_FF_EVENTS && port->ff_events[e.code].in_use)
-         {
-            port->ff_events[e.code].repetitions = e.value;
-            update_ff_start_stop(&port->ff_events[e.code], current_time);
-         }
-      }
-   }
+	struct input_event e;
+	
+	ssize_t ret = read(port->uinput, &e, sizeof(e));
+	if (ret == sizeof(e))
+	{
+		if (e.type == EV_UINPUT)
+		{
+			switch (e.code)
+			{
+				case UI_FF_UPLOAD:
+				{
+					struct uinput_ff_upload upload = { 0 };
+					upload.request_id = e.value;
+					ioctl(port->uinput, UI_BEGIN_FF_UPLOAD, &upload);
+					int id = create_ff_event(port, &upload);
+					if (id < 0)
+					{
+						// TODO: what's the proper error code for this?
+						upload.retval = -1;
+					}
+					else
+					{
+						upload.retval = 0;
+						upload.effect.id = id;
+						printf("%s", "sick words");
+					}
+					ioctl(port->uinput, UI_END_FF_UPLOAD, &upload);
+					break;
+				}
+				case UI_FF_ERASE:
+				{
+					struct uinput_ff_erase erase = { 0 };
+					erase.request_id = e.value;
+					ioctl(port->uinput, UI_BEGIN_FF_ERASE, &erase);
+					if (erase.effect_id < MAX_FF_EVENTS)
+						port->ff_events[erase.effect_id].in_use = false;
+					ioctl(port->uinput, UI_END_FF_ERASE, &erase);
+				}
+			}
+		}
+		else if (e.type == EV_FF)
+		{
+			if (e.code < MAX_FF_EVENTS && port->ff_events[e.code].in_use)
+			{
+            	port->ff_events[e.code].repetitions = e.value;
+            	update_ff_start_stop(&port->ff_events[e.code], current_time);
+         	}
+      	}
+	}
 }
 
 static void *adapter_thread(void *data)
 {
-   struct adapter *a = (struct adapter *)data;
+	struct adapter *a = (struct adapter *)data;
 
-    int bytes_transferred;
-    unsigned char payload[1] = { 0x13 };
+	int bytes_transferred;
+	unsigned char payload[1] = { 0x13 };
 
-    int transfer_ret = libusb_interrupt_transfer(a->handle, EP_OUT, payload, sizeof(payload), &bytes_transferred, 0);
+	int transfer_ret = libusb_interrupt_transfer(a->handle, EP_OUT, payload, sizeof(payload), &bytes_transferred, 0);
 
-    if (transfer_ret != 0) {
-        fprintf(stderr, "libusb_interrupt_transfer: %s\n", libusb_error_name(transfer_ret));
-        return NULL;
-    }
-    if (bytes_transferred != sizeof(payload)) {
-        fprintf(stderr, "libusb_interrupt_transfer %d/%d bytes transferred.\n", bytes_transferred, sizeof(payload));
-        return NULL;
-    }
+	if (transfer_ret != 0) 
+	{
+		fprintf(stderr, "libusb_interrupt_transfer: %s\n", libusb_error_name(transfer_ret));
+		return NULL;
+	}
+	
+	if (bytes_transferred != sizeof(payload)) {
+		fprintf(stderr, "libusb_interrupt_transfer %d/%d bytes transferred.\n", bytes_transferred, sizeof(payload));
+		return NULL;
+	}
+	
+	//loop until a controller is plugged into the adapter
+	while (!a->quitting)
+	{
+		
+		unsigned char payload[37];
+		int size = 0;
+		int transfer_ret = libusb_interrupt_transfer(a->handle, EP_IN, payload, sizeof(payload), &size, 0);
+		if (transfer_ret != 0) 
+		{
+			fprintf(stderr, "libusb_interrupt_transfer error %d\n", transfer_ret);
+			a->quitting = true;
+			break;
+		}
+	
+		if (size != 37 || payload[0] != 0x21)
+		continue;
 
-   while (!a->quitting)
-   {
-      unsigned char payload[37];
-      int size = 0;
-      int transfer_ret = libusb_interrupt_transfer(a->handle, EP_IN, payload, sizeof(payload), &size, 0);
-      if (transfer_ret != 0) {
-         fprintf(stderr, "libusb_interrupt_transfer error %d\n", transfer_ret);
-         a->quitting = true;
-         break;
-      }
-      if (size != 37 || payload[0] != 0x21)
-         continue;
+		unsigned char *controller = &payload[1];
 
-      unsigned char *controller = &payload[1];
+		unsigned char rumble[5] = { 0x11, 0, 0, 0, 0 };
+		struct timespec current_time = { 0 };
+		clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
+		for (int i = 0; i < 4; i++, controller += 9)
+		{
+			handle_payload(i, &a->controllers[i], controller, &current_time);
+			rumble[i+1] = 0;
+			if (a->controllers[i].extra_power && a->controllers[i].type == STATE_NORMAL)
+			{
+				for (int j = 0; j < MAX_FF_EVENTS; j++)
+				{
+					struct ff_event *e = &a->controllers[i].ff_events[j];
+					if (e->in_use)
+					{
+						bool after_start = ts_lessthan(&e->start_time, &current_time);
+						bool before_end = ts_greaterthan(&e->end_time, &current_time);
+						if (after_start && before_end)
+							rumble[i+1] = 1;
+						else if (after_start && !before_end)
+                     	update_ff_start_stop(e, &current_time);
+					}
+				}
+			}
+		}
 
-      unsigned char rumble[5] = { 0x11, 0, 0, 0, 0 };
-      struct timespec current_time = { 0 };
-      clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
-      for (int i = 0; i < 4; i++, controller += 9)
-      {
-         handle_payload(i, &a->controllers[i], controller, &current_time);
-         rumble[i+1] = 0;
-         if (a->controllers[i].extra_power && a->controllers[i].type == STATE_NORMAL)
-         {
-            for (int j = 0; j < MAX_FF_EVENTS; j++)
-            {
-               struct ff_event *e = &a->controllers[i].ff_events[j];
-               if (e->in_use)
-               {
-                  bool after_start = ts_lessthan(&e->start_time, &current_time);
-                  bool before_end = ts_greaterthan(&e->end_time, &current_time);
-
-                  if (after_start && before_end)
-                     rumble[i+1] = 1;
-                  else if (after_start && !before_end)
-                     update_ff_start_stop(e, &current_time);
-               }
-            }
-         }
-      }
-
-      if (memcmp(rumble, a->rumble, sizeof(rumble)) != 0)
-      {
-         memcpy(a->rumble, rumble, sizeof(rumble));
-         transfer_ret = libusb_interrupt_transfer(a->handle, EP_OUT, a->rumble, sizeof(a->rumble), &size, 0);
-         if (transfer_ret != 0) {
-            fprintf(stderr, "libusb_interrupt_transfer error %d\n", transfer_ret);
-            a->quitting = true;
-            break;
-         }
-      }
-   }
+		if (memcmp(rumble, a->rumble, sizeof(rumble)) != 0)
+		{
+			memcpy(a->rumble, rumble, sizeof(rumble));
+			transfer_ret = libusb_interrupt_transfer(a->handle, EP_OUT, a->rumble, sizeof(a->rumble), &size, 0);
+         		
+         	if (transfer_ret != 0) 
+			{
+				fprintf(stderr, "libusb_interrupt_transfer error %d\n", transfer_ret);
+				a->quitting = true;
+				break;
+			}
+		}
+	}
 
    for (int i = 0; i < 4; i++)
    {
@@ -524,34 +538,37 @@ static void *adapter_thread(void *data)
 
 static void add_adapter(struct libusb_device *dev)
 {
-   struct adapter *a = calloc(1, sizeof(struct adapter));
-   if (a == NULL)
-   {
-      fprintf(stderr, "FATAL: calloc() failed\n");
-      exit(-1);
+	struct adapter *a = calloc(1, sizeof(struct adapter));
+	if (a == NULL)
+	{
+		fprintf(stderr, "FATAL: calloc() failed\n");
+		exit(-1);
+	}
+	a->device = dev;
+
+	if (libusb_open(a->device, &a->handle) != 0)
+	{
+		fprintf(stderr, "Error opening device %p\n", a->device);
+		return;
+	}
+
+	if (libusb_kernel_driver_active(a->handle, 0) == 1)
+	{
+		fprintf(stderr, "Detaching kernel driver\n");
+       
+	if (libusb_detach_kernel_driver(a->handle, 0)) 
+	{
+		fprintf(stderr, "Error detaching handle %p from kernel\n", a->handle);
+		return;
+	}
    }
-   a->device = dev;
 
-   if (libusb_open(a->device, &a->handle) != 0)
-   {
-      fprintf(stderr, "Error opening device %p\n", a->device);
-      return;
-   }
+	struct adapter *old_head = adapters.next;
+	adapters.next = a;
+	a->next = old_head;
 
-   if (libusb_kernel_driver_active(a->handle, 0) == 1) {
-       fprintf(stderr, "Detaching kernel driver\n");
-       if (libusb_detach_kernel_driver(a->handle, 0)) {
-           fprintf(stderr, "Error detaching handle %p from kernel\n", a->handle);
-           return;
-       }
-   }
-
-   struct adapter *old_head = adapters.next;
-   adapters.next = a;
-   a->next = old_head;
-
-	//thread create
-   pthread_create(&a->thread, NULL, adapter_thread, a);
+	//create thread for each controller,
+	pthread_create(&a->thread, NULL, adapter_thread, a);
 
    fprintf(stderr, "adapter %p connected\n", a->device);
 }
@@ -579,6 +596,7 @@ static void remove_adapter(struct libusb_device *dev)
 
 static int LIBUSB_CALL hotplug_callback(struct libusb_context *ctx, struct libusb_device *dev, libusb_hotplug_event event, void *user_data)
 {
+	printf("[*] does this code run at all?");
    (void)ctx;
    (void)user_data;
    if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED)
@@ -601,9 +619,12 @@ static void quitting_signal(int sig)
 
 int main(int argc, char *argv[])
 {
-	printf("%s\n[*]%i was passed\n[*]%c was passed\n", "[*]main called[*]", argc, *argv[]);
+
+	printf("[*] main called [*]\n");
+	printf("[*] %i was passed\n", argc);
 	
 	//structure declarations
+	//udev monitors when a USB is plugged in
 	struct udev *udev;
 	struct udev_device *uinput;
 	//struct sigaction is the instructions for the function sigaction()
@@ -617,9 +638,17 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "raw mode enabled\n");
 		raw_mode = true;
 	}
-
+	
+	//determines what action is associates with signum
 	sa.sa_handler = quitting_signal;
+	
+	//specifies that SA_RESTART and SA_RESETHAND are flags to modify signals
+	//SA_RESTART upon returning from the handler, the library function resumes
+	//if SA_RESTART is not set, the program fails and returns an error
+	//SA_RESETHAND restores the signal action to the default upon entry to signal handler
 	sa.sa_flags = SA_RESTART | SA_RESETHAND;
+	
+	//initializes set of signals in input to empty
  	sigemptyset(&sa.sa_mask);
 	
 	//sigaction is a system call that returns 0 on failure and 1 on success
@@ -628,13 +657,16 @@ int main(int argc, char *argv[])
    	//SIGTERM is a termination request
    	sigaction(SIGTERM, &sa, NULL);
 
+	//returns a pointer to udev library context; saves to udev
    	udev = udev_new();
+   	
    	if (udev == NULL)
    	{
       		fprintf(stderr, "udev init errors\n");
       		return -1;
    	}
 
+	//returns new udev device; saves in uinput
    	uinput = udev_device_new_from_subsystem_sysname(udev, "misc", "uinput");
    	if (uinput == NULL)
    	{
@@ -642,11 +674,16 @@ int main(int argc, char *argv[])
       		return -1;
    	}
 
+	//returns a string that describes the requested property; saves to uinput
    	uinput_path = udev_device_get_devnode(uinput);
    	if (uinput_path == NULL)
    	{
    		fprintf(stderr, "cannot find path to uinput\n");
 		return -1;
+   	}
+   	else
+   	{
+   		printf("[*] %s", uinput_path);
    	}
 
    	libusb_init(NULL);
@@ -677,6 +714,7 @@ int main(int argc, char *argv[])
 		int hotplug_ret = libusb_hotplug_register_callback(NULL,
 		LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
 		0, 0x057e, 0x0337,
+		LIBUSB_HOTPLUG_MATCH_ANY, hotplug_callback, NULL, &callback);
 
 	if (hotplug_ret != LIBUSB_SUCCESS)
 	{
