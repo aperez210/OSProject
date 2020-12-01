@@ -122,7 +122,6 @@ static bool uinput_create(int i, struct ports *port, unsigned char type)
    memset(&uinput_dev, 0, sizeof(uinput_dev));
    port->uinput = open(uinput_path, O_RDWR | O_NONBLOCK);
 	
-	printf("[*] buttons being called\n");
    // buttons
    // icotl is a system call...
    ioctl(port->uinput, UI_SET_EVBIT, EV_KEY);
@@ -138,8 +137,7 @@ static bool uinput_create(int i, struct ports *port, unsigned char type)
    ioctl(port->uinput, UI_SET_KEYBIT, BTN_TL);
    ioctl(port->uinput, UI_SET_KEYBIT, BTN_TR);
    ioctl(port->uinput, UI_SET_KEYBIT, BTN_TR2);
-	printf("[*] buttons done being called\n");
-	printf("[*] axis being called\n");
+   
    // axis
    ioctl(port->uinput, UI_SET_EVBIT, EV_ABS);
    ioctl(port->uinput, UI_SET_ABSBIT, ABS_X);
@@ -303,6 +301,7 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
 {
 	unsigned char status = payload[0];
 	unsigned char type = connected_type(status);
+
 	
 	if (type != 0 && !port->connected)
 	{	
@@ -311,7 +310,6 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
    	}
    	else if (type == 0 && port->connected)
    	{
-	   	printf("[*] Port connected and type == 0\n");
     	uinput_destroy(i, port);
    	}
 
@@ -343,9 +341,34 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
 			each button is a power of 2, and has its own bit
 			Note 2^4, 2^5, 2^6, 2^7 do not have any buttons
 			*/
-			printf("Button pressed: %u\n",port->buttons);
+			if(checkBitK((int)port->buttons,1) == 1)
+				printf("\r\t\tStart button pressed          ");
+			if(checkBitK((int)port->buttons,2) == 1)
+				printf("\r\t\tZ button pressed          ");
+			if(checkBitK((int)port->buttons,3) == 1)
+				printf("\r\t\tR button pressed          ");
+			if(checkBitK((int)port->buttons,4) == 1)
+				printf("\r\t\tL button pressed          ");
+				
+				
+			if(checkBitK((int)port->buttons,9) == 1)
+				printf("\r\t\tA button pressed          ");
+			if(checkBitK((int)port->buttons,10) == 1)
+				printf("\r\t\tB button pressed          ");
+			if(checkBitK((int)port->buttons,11) == 1)
+				printf("\r\t\tX button pressed          ");
+			if(checkBitK((int)port->buttons,12) == 1)
+				printf("\r\t\tY button pressed          ");
+			if(checkBitK((int)port->buttons,13) == 1)
+				printf("\r\t\tD-pad left pressed          ");
+			if(checkBitK((int)port->buttons,14) == 1)
+				printf("\r\t\tD-pad right pressed          ");
+			if(checkBitK((int)port->buttons,15) == 1)
+				printf("\r\t\tD-pad down pressed          ");
+			if(checkBitK((int)port->buttons,16) == 1)
+				printf("\r\t\tD-pad up pressed          ");
 		}
-		sleep(.75);
+		//sleep(.9);
 		if (BUTTON_OFFSET_VALUES[j] == -1)
 			continue;
 
@@ -363,17 +386,46 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
         	port->buttons |= pressed;      
       	}
 	}
-   
 
 	for (int j = 0; j < 6; j++)
 	{
 		//port->axis[j] is an array holding ALL analog inputs
 		//both joysticks have 2, an X and a Y axis
 		//both triggers have 1, this is why j goes to 6
-		printf("%d:%u, ",j,port->axis[j]);
 		
+		if(j < 4)
+		{
+			//printf("\r%d:%u, \n",j+1,port->axis[j]);
+			if(port->axis[1] < 55)
+			{
+				printf("\rnorth");
+			}
+			else if(port->axis[1] > 165)
+			{
+				printf("\rsouth");
+			}
+			else
+			{
+				printf("\r      ");
+			}
+			
+			if(port->axis[0] < 55)
+			{
+				printf("\r\twest");
+			}
+			else if(port->axis[0] > 165)
+			{
+				printf("\r\teast");
+			}
+			else
+			{
+				printf("\r\t    ");
+			}
+		}
 		unsigned char value = payload[j+3];
-
+		
+		//we're always checking for all possible values of each axis
+		//it starts checking the x axis of the main joystick until it gets to the axis of the analog triggers
 		if (AXIS_OFFSET_VALUES[j] == ABS_Y || AXIS_OFFSET_VALUES[j] == ABS_RY)
 			value ^= 0xFF; // flip from 0 - 255 to 255 - 0
 
@@ -383,11 +435,10 @@ static void handle_payload(int i, struct ports *port, unsigned char *payload, st
 			events[e_count].code = AXIS_OFFSET_VALUES[j];
         	events[e_count].value = value;
         	e_count++;
+        	//update the axis to match the joystick
         	port->axis[j] = value;
-         
 		}
  	}
-
 	if (e_count > 0)
 	{
 		events[e_count].type = EV_SYN;
@@ -605,7 +656,7 @@ static void remove_adapter(struct libusb_device *dev)
 
 static int LIBUSB_CALL hotplug_callback(struct libusb_context *ctx, struct libusb_device *dev, libusb_hotplug_event event, void *user_data)
 {
-	printf("[*] does this code run at all?");
+
    (void)ctx;
    (void)user_data;
    if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED)
@@ -626,11 +677,18 @@ static void quitting_signal(int sig)
    quitting = 1;
 }
 
+int checkBitK(int n, int k)
+{
+	if(n & (1 << (k - 1)))
+		return 1;
+	else
+		return 0;
+}
+
 int main(int argc, char *argv[])
 {
 
 	printf("[*] main called [*]\n");
-	printf("[*] %i was passed\n", argc);
 	
 	//structure declarations
 	//udev monitors when a USB is plugged in
@@ -644,7 +702,6 @@ int main(int argc, char *argv[])
 
 	if (argc > 1 && (strcmp(argv[1], "-r") == 0 || strcmp(argv[1], "--raw") == 0))
 	{
-		fprintf(stderr, "raw mode enabled\n");
 		raw_mode = true;
 	}
 	
@@ -655,16 +712,16 @@ int main(int argc, char *argv[])
 	//SA_RESTART upon returning from the handler, the library function resumes
 	//if SA_RESTART is not set, the program fails and returns an error
 	//SA_RESETHAND restores the signal action to the default upon entry to signal handler
-	sa.sa_flags = SA_RESTART | SA_RESETHAND;
+		sa.sa_flags = SA_RESTART | SA_RESETHAND;
 	
 	//initializes set of signals in input to empty
- 	sigemptyset(&sa.sa_mask);
+ 	//sigemptyset(&sa.sa_mask);
 	
 	//sigaction is a system call that returns 0 on failure and 1 on success
 	//SIGINT means there is an external interrupt, usually from the user
-   	sigaction(SIGINT, &sa, NULL);
+   	//sigaction(SIGINT, &sa, NULL);
    	//SIGTERM is a termination request
-   	sigaction(SIGTERM, &sa, NULL);
+   	//sigaction(SIGTERM, &sa, NULL);
 
 	//returns a pointer to udev library context; saves to udev
    	udev = udev_new();
@@ -690,10 +747,6 @@ int main(int argc, char *argv[])
    		fprintf(stderr, "cannot find path to uinput\n");
 		return -1;
    	}
-   	else
-   	{
-   		printf("[*] %s", uinput_path);
-   	}
 
    	libusb_init(NULL);
 
@@ -701,6 +754,7 @@ int main(int argc, char *argv[])
 
    	int count = libusb_get_device_list(NULL, &devices);
 	
+	//check all devices in the devices array and find the one with the vendor id and product id we're looking for
 	for (int i = 0; i < count; i++)
    	{
       		struct libusb_device_descriptor desc;
